@@ -1,6 +1,6 @@
 # RSS
 
-Modifica el .py para especificar el RSS de google news, y el .yml en .github/workflows para cambiarle el nombre.
+Modifica el .py para especificar el RSS de google news, y el .yml en .github/workflows para cambiarle el nombre. Debes clonar en tu propio github este repositorio.
 
 1. Crea un canal.
 2. Crea un bot con @BotFather, un bot de telegram que te permite generar el tuyo propio. Te dará el token del bot.
