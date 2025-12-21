@@ -1,28 +1,56 @@
 import feedparser
 import requests
 import os
+import json
+import urllib.parse
 from datetime import datetime
 import pytz
 import time
 
-# Aquí puedes modificar la palabra clave para poner lo que desees: eg. madrid, o Villaverde
-RSS_URL = "https://news.google.com/rss/search?q=carabanchel+when:1d&hl=es&gl=ES&ceid=ES:es&ned=es&nocache=1"
+# --- CONFIGURACIÓN DE BARRIOS ---
+KEYWORDS = [
+    "Barrio Comillas Madrid",
+    "Opañel", 
+    "San Isidro Carabanchel",
+    "Vista Alegre Carabanchel", # Cambiado a Carabanchel para evitar Vistalegres extranjeros
+    "Puerta Bonita Madrid", 
+    "Buenavista Carabanchel", 
+    "Abrantes Carabanchel", 
+    "Carabanchel Alto",
+    "Carabanchel"
+]
+
+# --- PALABRAS A EXCLUIR ---
+# Quitamos fútbol, apuestas y lugares de latam que coinciden
+NEGATIVE_KEYWORDS = "-fútbol -soccer -apuestas -pronóstico -Colombia -Argentina -Bucaramanga -Chile"
+
+# URL base: inyectamos la query y las negativas
+RSS_BASE_URL = "https://news.google.com/rss/search?q={query}+{negatives}+when:1d&hl=es&gl=ES&ceid=ES:es&ned=es&nocache=1"
 
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHANNEL_ID = os.environ.get("TELEGRAM_CHAT_ID")
+HISTORY_FILE = "history.json"
 
-# Ventana configurable: por defecto 24 horas (para pillar noticias de ayer noche)
-MAX_HOURS = int(os.environ.get("NEWS_MAX_HOURS", "24"))
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return []
+    return []
 
-def send_telegram_message(title, link, date_str):
+def save_history(history):
+    trimmed_history = history[-500:] 
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(trimmed_history, f, indent=2)
+
+def send_telegram_message(neighborhood, title, link, date_str):
     if not BOT_TOKEN or not CHANNEL_ID:
         print("ERROR: Faltan tokens de Telegram.")
-        return
+        return False
 
-    # Escapamos caracteres especiales de Markdown si fuera necesario, 
-    # pero para simplificar usamos HTML o Markdown simple.
-    msg = f"🗞 **Noticia Carabanchel**\n\n{title}\n📅 {date_str}\n🔗 {link}"
-    
+    msg = f"🗞 *Noticia {neighborhood}*\n\n{title}\n📅 {date_str}\n🔗 {link}"
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": CHANNEL_ID,
@@ -31,72 +59,91 @@ def send_telegram_message(title, link, date_str):
         "disable_web_page_preview": False
     }
 
-    try:
-        r = requests.post(url, json=data, timeout=15)
-        if r.status_code == 200:
-            print(f" -> [Telegram] Mensaje enviado: {title}")
-        else:
-            print(f" -> [Telegram] Error ({r.status_code}): {r.text}")
-    except Exception as e:
-        print(f" -> [Telegram] Excepción: {e}")
+    # SISTEMA DE REINTENTOS PARA ERROR 429, el error de muchos intentos en poco tiempo
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            r = requests.post(url, json=data, timeout=15)
+            
+            if r.status_code == 200:
+                print(f" -> [Telegram] Enviado: {title}")
+                return True
+            
+            # Si Telegram dice "Too Many Requests" (Error 429)
+            elif r.status_code == 429:
+                retry_after = int(r.json().get("parameters", {}).get("retry_after", 10))
+                print(f" ⏳ Rate Limit alcanzado. Esperando {retry_after} segundos...")
+                time.sleep(retry_after + 2) # Esperamos lo que pide + 2 segundos extra
+                continue # Reintentamos el bucle
+            
+            else:
+                print(f" -> [Telegram] Error no recuperable ({r.status_code}): {r.text}")
+                return False
+
+        except Exception as e:
+            print(f" -> [Telegram] Excepción de red: {e}")
+            time.sleep(5) # Espera un poco antes de reintentar si es error de conexión
+    
+    return False
 
 def main():
     print("--- Iniciando Bot de Noticias Carabanchel ---")
     
-    # Parsear el feed
-    feed = feedparser.parse(RSS_URL)
-    
-    # Configurar zonas horarias
+    history = load_history()
+    initial_history_count = len(history)
+    seen_in_this_run = set() 
     madrid_tz = pytz.timezone('Europe/Madrid')
-    now_madrid = datetime.now(madrid_tz)
-    
-    print(f"Ahora (Madrid): {now_madrid.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    print(f"Buscando noticias de las últimas {MAX_HOURS} horas.")
-
     noticias_enviadas = 0
-    noticias_totales = len(feed.entries)
-    print(f"Entradas totales en el RSS: {noticias_totales}")
 
-    # Recorremos las noticias con un bucle for, pero creo que hay alguna manera más limpia
-    for entry in feed.entries:
-        title = entry.get("title", "<sin título>")
-        link = entry.get("link", "")
+    # Preparamos las negativas para la URL (codificadas)
+    encoded_negatives = urllib.parse.quote_plus(NEGATIVE_KEYWORDS)
+
+    for neighborhood in KEYWORDS:
+        print(f"\n🔍 Buscando: {neighborhood}...")
+        
+        encoded_query = urllib.parse.quote_plus(neighborhood)
+        # Combinamos query + negativas
+        rss_url = RSS_BASE_URL.format(query=encoded_query, negatives=encoded_negatives)
         
         try:
-            # Obtener fecha de publicación
-            published_struct = entry.get("published_parsed") or entry.get("updated_parsed")
-            
-            if not published_struct:
-                # Si no hay fecha, saltamos para evitar errores
-                continue
+            feed = feedparser.parse(rss_url)
+        except Exception as e:
+            print(f"   Error RSS: {e}")
+            continue
+        
+        if not feed.entries:
+            print("   (Sin entradas)")
+            continue
 
-            # Convertir a datetime con zona horaria UTC y luego a Madrid
+        for entry in feed.entries:
+            title = entry.get("title", "<sin título>")
+            link = entry.get("link", "")
+            guid = entry.get("id", link)
+            
+            if guid in history: continue
+            if guid in seen_in_this_run: continue
+
+            published_struct = entry.get("published_parsed") or entry.get("updated_parsed")
+            if not published_struct: continue
+
             pub_datetime_utc = datetime(*published_struct[:6], tzinfo=pytz.utc)
             pub_datetime_madrid = pub_datetime_utc.astimezone(madrid_tz)
-            
-            # Calcular antigüedad en horas
-            age_hours = (now_madrid - pub_datetime_madrid).total_seconds() / 3600
-            
-            # Si la noticia tiene menos horas que el máximo permitido (ej. 24h), se envía
-            if 0 <= age_hours <= MAX_HOURS:
-                print(f"✅ ACEPTADA (Hace {age_hours:.2f} h): {title}")
-                
-                send_telegram_message(
-                    title, 
-                    link, 
-                    pub_datetime_madrid.strftime("%d/%m/%Y %H:%M")
-                )
+            date_str = pub_datetime_madrid.strftime("%d/%m/%Y %H:%M")
+
+            if send_telegram_message(neighborhood, title, link, date_str):
+                history.append(guid)
+                seen_in_this_run.add(guid)
                 noticias_enviadas += 1
-                time.sleep(1) # Pequeña pausa para no saturar la API
-            else:
-                # Opcional: imprimir las descartadas para depurar (no se envían)
-                # print(f"❌ DESCARTADA (Hace {age_hours:.2f} h): {title}")
-                pass
+                # Pausa base entre mensajes normales para no forzar
+                time.sleep(3) 
 
-        except Exception as e:
-            print(f"Error procesando entrada '{title}': {e}")
+    if len(history) > initial_history_count:
+        print(f"\nGuardando historial actualizado ({len(history)} entradas)...")
+        save_history(history)
+    else:
+        print("\nNo hay noticias nuevas para guardar.")
 
-    print(f"--- Fin. Noticias enviadas: {noticias_enviadas} ---")
+    print(f"--- Fin. Noticias enviadas hoy: {noticias_enviadas} ---")
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
