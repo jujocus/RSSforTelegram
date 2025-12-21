@@ -2,14 +2,22 @@ name: Noticias Carabanchel Diario
 
 on:
   schedule:
-    # Se ejecuta a las 08:00 UTC (09:00 o 10:00 hora España según estación)
+    # Mañana (08:00 UTC -> 09:00/10:00 España)
     - cron: '0 8 * * *'
-  # Esto permite ejecutarlo manualmente para probar
+    # Noche (20:00 UTC -> 21:00/22:00 España)
+    - cron: '0 20 * * *'
+  
+  # Ejecución manual desde la pestaña Actions
   workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    
+    # IMPORTANTE: Permisos para que el bot pueda guardar el historial en el repo
+    permissions:
+      contents: write
+
     steps:
       - name: Descargar código
         uses: actions/checkout@v3
@@ -20,11 +28,28 @@ jobs:
           python-version: '3.9'
 
       - name: Instalar dependencias
-        run: pip install -r requirements.txt
+        # Si no tienes requirements.txt, puedes usar: pip install feedparser requests pytz
+        run: pip install feedparser requests pytz
 
       - name: Ejecutar script
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          NEWS_MAX_HOURS: "24"   # por ejemplo
         run: python main.py
+
+      # Paso para guardar el historial.json en el repositorio
+      - name: Guardar historial de noticias (Commit & Push)
+        run: |
+          git config --global user.name "NoticiasBot"
+          git config --global user.email "bot@noreply.github.com"
+          
+          # Añadimos el archivo history.json
+          git add history.json
+          
+          # Comprobamos si hay cambios antes de hacer commit
+          if git diff-index --quiet HEAD; then
+            echo "No hay cambios en el historial."
+          else
+            git commit -m "Actualizar historial de noticias enviadas [skip ci]"
+            git push
+          fi
