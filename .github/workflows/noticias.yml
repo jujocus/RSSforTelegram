@@ -28,7 +28,6 @@ jobs:
           python-version: '3.9'
 
       - name: Instalar dependencias
-        # Si no tienes requirements.txt, puedes usar: pip install feedparser requests pytz
         run: pip install feedparser requests pytz
 
       - name: Ejecutar script
