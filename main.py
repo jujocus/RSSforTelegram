@@ -10,19 +10,26 @@ import time
 # --- CONFIGURACIÓN DE BARRIOS ---
 KEYWORDS = [
     "Barrio Comillas Madrid",
-    "Opañel", 
+    "Opañel Madrid",
     "San Isidro Carabanchel",
-    "Vista Alegre Carabanchel", # Cambiado a Carabanchel para evitar Vistalegres extranjeros
-    "Puerta Bonita Madrid", 
-    "Buenavista Carabanchel", 
-    "Abrantes Carabanchel", 
-    "Carabanchel Alto",
-    "Carabanchel"
+    "Vista Alegre Carabanchel",
+    "Palacio de Vistalegre",       # nuevo: cubre eventos/noticias en el recinto
+    "Puerta Bonita Madrid",
+    "Buenavista Carabanchel",
+    "Abrantes Carabanchel",
+    "Carabanchel Alto Madrid",
+    "Carabanchel Madrid",
+    "barrio Oporto Madrid",
+    "Plaza Elíptica Madrid",
 ]
 
 # --- PALABRAS A EXCLUIR ---
 # Quitamos fútbol, apuestas y lugares de latam que coinciden
-NEGATIVE_KEYWORDS = "-fútbol -soccer -apuestas -pronóstico -Colombia -Argentina -Bucaramanga -Chile"
+NEGATIVE_KEYWORDS = (
+    "-fútbol -soccer -apuestas -pronóstico "
+    "-Colombia -Argentina -Bucaramanga -Chile -Portugal -Porto "
+    "-Galicia -Castilla -Perú -Peru -.pe -Callao -Panguipulli"
+)
 
 # URL base: inyectamos la query y las negativas
 RSS_BASE_URL = "https://news.google.com/rss/search?q={query}+{negatives}+when:1d&hl=es&gl=ES&ceid=ES:es&ned=es&nocache=1"
